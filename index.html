@@ -365,6 +365,21 @@ $('#paste').value = `Exemple : un post qui cache ses liens\nLien 1 : ${demo1}\nL
 add($('#paste').value, 'exemple', '');
 exampleShown = true; render();
 status('Exemple chargé. Lance un scan ou colle ton propre texte.');
+
+/* Contenu reçu via le menu Partager d'Android (Web Share Target) */
+const qp = new URLSearchParams(location.search);
+const shared = ['title','text','url'].map(k => qp.get(k) || '').filter(Boolean).join('\n');
+if (shared){
+  history.replaceState(null, '', location.pathname);
+  document.querySelector('#tab-paste').click();
+  $('#paste').value = shared;
+  resetResults();
+  const n = add(shared, 'partage', '');
+  if (n) status(`${n} lien(s) décodé(s) depuis le partage.`, 'ok');
+  else if (/^\s*https?:\/\/\S*reddit\.com\/\S*\s*$/i.test(shared))
+    status('Reddit n\'a partagé que l\'adresse du post. Sélectionne plutôt le texte du post, puis Partager vers Décodeur B64.', 'err');
+  else status('Aucune chaîne base64 contenant un lien dans le texte partagé.');
+}
 })();
 </script>
 </body>

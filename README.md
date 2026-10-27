@@ -17,3 +17,7 @@ Si Reddit renvoie 403 en anonyme, crée une app de type **installed app** sur ht
 ## Limites
 
 Les liens de partage courts (`/s/xxxx`) ne se résolvent pas toujours depuis un navigateur à cause du CORS : ouvre-les et colle l'URL complète.
+
+## Partage depuis Android
+
+Une fois l'app installée (« Ajouter à l'écran d'accueil »), elle apparaît dans le menu Partager. Sélectionne le texte d'un post Reddit, Partager, Décodeur B64 : les liens s'affichent directement. Si le partage ne contient que l'adresse du post, sélectionne le texte lui-même.
