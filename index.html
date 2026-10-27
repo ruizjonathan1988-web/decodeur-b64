@@ -71,6 +71,9 @@ summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--muted)}
 .pill.src{background:var(--code-bg);color:var(--muted);border:1px solid var(--line)}
 .meta a{color:var(--muted)}
 .raw{font:12px var(--f-mono);color:var(--muted);overflow-wrap:anywhere;word-break:break-all;max-height:3.2em;overflow:hidden}
+.pastebox{border-top:1px solid var(--line);padding-top:8px}
+.pastebox summary{font-size:.85rem}
+.pastebox pre{font:12px/1.5 var(--f-mono);background:var(--code-bg);border-radius:7px;padding:10px;margin:8px 0;max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
 .example{font-size:.8rem;font-weight:600;color:var(--layer-ink);background:var(--layer);padding:3px 9px;border-radius:5px;justify-self:start}
 .empty{color:var(--muted);padding:24px;text-align:center;border:1px dashed var(--line);border-radius:10px}
 @media (prefers-reduced-motion:no-preference){.card{animation:in .18s ease-out}@keyframes in{from{transform:translateY(4px);opacity:.4}}}
@@ -95,7 +98,7 @@ summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--muted)}
         <div>
           <label for="src">Subreddit ou URL de post</label>
           <input id="src" type="text" placeholder="IPTV_ZONENEW ou https://www.reddit.com/r/…/comments/…" autocomplete="off" autocapitalize="off" spellcheck="false">
-          <p class="hint">Un lien de partage court (…/s/xxxx) ne se résout pas toujours depuis un navigateur : ouvre-le et colle l'URL complète en /comments/.</p>
+          <p class="hint">Les liens de partage courts (…/s/xxxx) sont acceptés quand le relais est réglé.</p>
         </div>
         <div class="row">
           <div><label for="sort">Tri</label>
@@ -107,14 +110,6 @@ summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--muted)}
           <button id="run" class="btn primary">Lancer le scan</button>
           <button id="stop" class="btn" disabled>Arrêter</button>
         </div>
-        <details>
-          <summary>Accès OAuth (si Reddit renvoie 403)</summary>
-          <div style="margin-top:10px">
-            <label for="cid">Client ID d'une app « installed »</label>
-            <input id="cid" type="text" placeholder="ex. a1B2c3D4e5F6g7" autocomplete="off" spellcheck="false">
-            <p class="hint">Crée une app de type <b>installed app</b> sur reddit.com/prefs/apps (redirect URI quelconque). Pas besoin de secret : l'app passe par le flux « application only ». L'identifiant reste dans ce navigateur.</p>
-          </div>
-        </details>
       </div>
 
       <div id="mode-paste" hidden style="display:grid;gap:14px">
@@ -122,8 +117,25 @@ summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--muted)}
           <label for="paste">Texte à analyser</label>
           <textarea id="paste" spellcheck="false" placeholder="Colle ici le contenu d'un post, des commentaires, une page entière…"></textarea>
         </div>
+        <label class="check" for="plain" style="text-transform:none;letter-spacing:0;font-weight:500;color:var(--fg)"><input id="plain" type="checkbox" checked> Garder aussi les liens en clair</label>
         <button id="decode" class="btn primary">Décoder</button>
       </div>
+
+      <details id="settings">
+        <summary>Réglages d'accès (relais, OAuth)</summary>
+        <div style="margin-top:10px;display:grid;gap:14px">
+          <div>
+            <label for="relay">Adresse du relais</label>
+            <input id="relay" type="text" placeholder="https://decodeur-relais.xxx.workers.dev" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <p class="hint">Ton Cloudflare Worker (fichier worker.js du dépôt). Il permet de lire Reddit et d'ouvrir les liens paste.sh, que le navigateur ne peut pas lire directement.</p>
+          </div>
+          <div>
+            <label for="cid">Client ID Reddit (facultatif)</label>
+            <input id="cid" type="text" placeholder="ex. a1B2c3D4e5F6g7" autocomplete="off" spellcheck="false">
+            <p class="hint">Seulement si tu as une app « installed » validée par Reddit. Sinon, laisse vide et utilise le relais.</p>
+          </div>
+        </div>
+      </details>
 
       <div id="status" class="status" role="status" aria-live="polite">Prêt.</div>
     </section>
@@ -131,6 +143,7 @@ summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--muted)}
     <section class="results" aria-label="Liens trouvés">
       <div class="bar">
         <span class="count" id="count">0 lien</span>
+        <button id="open-pastes" class="btn small primary" hidden>Ouvrir les pastes</button>
         <button id="copy-all" class="btn small">Copier les liens</button>
         <button id="copy-csv" class="btn small">Copier en CSV</button>
         <button id="dl-csv" class="btn small" hidden>Télécharger CSV</button>
@@ -180,9 +193,11 @@ function extractLinks(text, maxDepth = 3){
 /* ---------- résultats ---------- */
 let rows = [], seen = new Set(), exampleShown = false;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function add(text, source, permalink){
+function add(text, source, permalink, plain = false){
   let n = 0;
-  for (const r of extractLinks(text)){
+  const found = extractLinks(text);
+  if (plain) (text.match(new RegExp(URL_RE_SRC,'gi')) || []).forEach(u => found.push({b64:'', link:u.replace(/[).,;\]]+$/,''), depth:0}));
+  for (const r of found){
     if (seen.has(r.link)) continue;
     seen.add(r.link);
     rows.push({lien:r.link, base64:r.b64, couches:r.depth, source, permalink: permalink ? 'https://www.reddit.com' + permalink : ''});
@@ -191,23 +206,83 @@ function add(text, source, permalink){
   if (n) render();
   return n;
 }
+
+/* ---------- relais + paste.sh ---------- */
+const relayURL = () => $('#relay').value.trim().replace(/\/+$/,'');
+const viaRelay = url => relayURL() ? `${relayURL()}/?url=${encodeURIComponent(url)}` : url;
+function needRelay(what){ $('#settings').open = true; $('#relay').focus();
+  return new Error(`${what} refuse les lectures depuis une autre page web. Règle l'adresse de ton relais dans « Réglages d'accès ».`); }
+
+const PASTE_RE = /^https?:\/\/paste\.sh\/([A-Za-z0-9_-]+)#([A-Za-z0-9_.-]+)/i;
+async function pasteDecrypt(id, clientkey, body, ctype){
+  clientkey = clientkey.replace(/[^A-Za-z0-9_-]/g,'');
+  const nl = body.indexOf('\n');
+  const serverkey = body.slice(0, nl).trim();
+  const raw = Uint8Array.from(atob(body.slice(nl + 1).replace(/\s+/g,'')), c => c.charCodeAt(0));
+  if (String.fromCharCode(...raw.slice(0, 8)) !== 'Salted__') throw new Error('Format de paste inattendu.');
+  const salt = raw.slice(8, 16), ct = raw.slice(16);
+  const pass = new TextEncoder().encode(id + serverkey + clientkey + 'https://paste.sh');
+  const derive = async v1 => {
+    if (v1){ const buf = new Uint8Array(pass.length + 8); buf.set(pass); buf.set(salt, pass.length);
+      return new Uint8Array(await crypto.subtle.digest('SHA-512', buf)); }
+    const base = await crypto.subtle.importKey('raw', pass, 'PBKDF2', false, ['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2', salt, iterations:1, hash:'SHA-512'}, base, 384));
+  };
+  const firstV1 = /text\/plain/i.test(ctype || '');
+  for (const v1 of [firstV1, !firstV1]){
+    const km = await derive(v1);
+    const key = await crypto.subtle.importKey('raw', km.slice(0, 32), 'AES-CBC', false, ['decrypt']);
+    let pt; try { pt = await crypto.subtle.decrypt({name:'AES-CBC', iv:km.slice(32, 48)}, key, ct) } catch { continue }
+    let text = new TextDecoder().decode(pt);
+    if (/vnd\.paste\.sh-v3/i.test(ctype || '') || /^Subject:.*\n\n/i.test(text)){ const i = text.indexOf('\n\n'); if (i >= 0) text = text.slice(i + 2); }
+    return text;
+  }
+  throw new Error('Clé invalide ou paste endommagé (vérifie que le lien contient bien toute la partie après #).');
+}
+async function openPaste(i){
+  const r = rows[i]; const m = r.lien.match(PASTE_RE); if (!m) return;
+  r.pasteState = 'loading'; render();
+  try {
+    let res;
+    try { res = await fetch(viaRelay(`https://paste.sh/${m[1]}.txt`)); }
+    catch { throw relayURL() ? new Error('Le relais ne répond pas. Vérifie son adresse.') : needRelay('paste.sh'); }
+    if (res.status === 404) throw new Error('Ce paste n\'existe plus (supprimé ou expiré).');
+    if (!res.ok) throw new Error(`paste.sh a répondu HTTP ${res.status}.`);
+    const text = await pasteDecrypt(m[1], m[2], await res.text(), res.headers.get('Content-Type'));
+    r.pasteText = text; r.pasteState = 'ok';
+    const n = add(text, `paste ${m[1]}`, '', true);
+    status(`Paste ${m[1]} ouvert : ${n} nouveau(x) lien(s).`, 'ok');
+  } catch (e) { r.pasteState = 'err'; status(e.message, 'err'); }
+  render();
+}
 function render(){
   const q = $('#filter').value.trim().toLowerCase();
   const vis = q ? rows.filter(r => (r.lien + ' ' + r.source).toLowerCase().includes(q)) : rows;
   $('#count').textContent = rows.length + (rows.length > 1 ? ' liens' : ' lien') + (q ? ` · ${vis.length} affiché${vis.length>1?'s':''}` : '');
   const list = $('#list');
+  $('#open-pastes').hidden = true;
   if (!rows.length){ list.innerHTML = '<div class="empty">Aucun lien pour l\'instant. Lance un scan ou colle du texte à gauche.</div>'; return; }
   list.innerHTML = (exampleShown ? '<span class="example">Exemple de démonstration, remplacé dès ta première analyse</span>' : '') +
     vis.map((r,i) => `<article class="card">
       <div class="link"><a href="${esc(r.lien)}" target="_blank" rel="noopener noreferrer">${esc(r.lien)}</a></div>
       <div class="meta">
-        <span class="pill" title="Nombre de couches base64">${r.couches} couche${r.couches>1?'s':''}</span>
+        <span class="pill${r.couches ? '' : ' src'}" title="Nombre de couches base64">${r.couches ? `${r.couches} couche${r.couches>1?'s':''}` : 'en clair'}</span>
         <span class="pill src">${esc(r.source)}</span>
         ${r.permalink ? `<a href="${esc(r.permalink)}" target="_blank" rel="noopener noreferrer">voir sur Reddit</a>` : ''}
-        <button class="btn small" data-copy="${rows.indexOf(r)}" style="margin-left:auto">Copier</button>
+        <span style="margin-left:auto;display:flex;gap:6px">
+          ${PASTE_RE.test(r.lien) && r.pasteState !== 'ok' ? `<button class="btn small primary" data-paste="${rows.indexOf(r)}" ${r.pasteState === 'loading' ? 'disabled' : ''}>${r.pasteState === 'loading' ? 'Ouverture…' : r.pasteState === 'err' ? 'Réessayer' : 'Extraire les liens'}</button>` : ''}
+          <button class="btn small" data-copy="${rows.indexOf(r)}">Copier</button>
+        </span>
       </div>
-      <div class="raw">${esc(r.base64)}</div>
+      ${r.base64 ? `<div class="raw">${esc(r.base64)}</div>` : ''}
+      ${r.pasteText ? `<details class="pastebox"><summary>Contenu du paste (${r.pasteText.split('\n').length} lignes)</summary>
+        <pre>${esc(r.pasteText)}</pre><button class="btn small" data-copytext="${rows.indexOf(r)}">Copier le contenu</button></details>` : ''}
     </article>`).join('');
+  $('#open-pastes').hidden = !rows.some(r => PASTE_RE.test(r.lien) && r.pasteState !== 'ok');
+}
+async function openAllPastes(){
+  const todo = rows.map((r, i) => i).filter(i => PASTE_RE.test(rows[i].lien) && rows[i].pasteState !== 'ok');
+  for (const i of todo){ await openPaste(i); if (rows[i].pasteState === 'err' && !relayURL()) break; }
 }
 function resetResults(){ rows = []; seen = new Set(); exampleShown = false; render(); }
 function toCSV(){
@@ -242,13 +317,12 @@ class Reddit {
     const url = this.base + path + (this.token ? '' : '.json') + '?' + new URLSearchParams(params);
     for (let a = 0; a < 4; a++){
       let r;
-      try { r = await fetch(url, {signal:this.sig, headers: this.token ? {Authorization:'Bearer ' + this.token} : {}}); }
+      try { r = await fetch(this.token ? url : viaRelay(url), {signal:this.sig, headers: this.token ? {Authorization:'Bearer ' + this.token} : {}}); }
       catch (e) { if (e.name === 'AbortError') throw e;
-        if (!this.token){ const d = document.querySelector('details'); if (d) d.open = true;
-          throw new Error('Reddit bloque l\'accès anonyme depuis un navigateur. Renseigne un Client ID dans « Accès OAuth » ci-dessus puis relance le scan.'); }
-        throw new Error('Requête bloquée (réseau ou CORS). Vérifie ta connexion, ou utilise l\'onglet « Texte collé ».'); }
+        if (!this.token && !relayURL()) throw needRelay('Reddit');
+        throw new Error(relayURL() ? 'Le relais ne répond pas. Vérifie son adresse dans « Réglages d\'accès ».' : 'Requête bloquée (réseau). Vérifie ta connexion.'); }
       if (r.status === 429){ const w = parseInt(r.headers.get('Retry-After')) || 10 * (a + 1); status(`Limite de requêtes atteinte, pause ${w} s…`); await sleep(w * 1000, this.sig); continue; }
-      if (r.status === 403 && !this.token) throw new Error('403 : Reddit bloque l\'accès anonyme. Renseigne un Client ID dans « Accès OAuth ».');
+      if (r.status === 403 && !this.token) throw new Error('403 : Reddit refuse l\'adresse de ton relais. Le scan direct n\'est pas possible par ce chemin ; utilise le partage ou le texte collé.');
       if (!r.ok) throw new Error(`Reddit a répondu HTTP ${r.status} pour ${path}`);
       return r.json();
     }
@@ -292,8 +366,8 @@ async function runReddit(){
     if (!/^https?:/i.test(src) && src.includes('reddit.com')) src = 'https://' + src;
     if (/\/s\/[A-Za-z0-9]+/.test(src)){
       status('Résolution du lien de partage…');
-      try { const r = await fetch(src, {signal:ctrl.signal}); src = r.url.split('?')[0]; }
-      catch (e) { if (e.name === 'AbortError') throw e; throw new Error('Le lien de partage ne se résout pas depuis le navigateur. Ouvre-le et colle l\'URL complète (…/comments/…).'); }
+      try { const r = await fetch(viaRelay(src), {signal:ctrl.signal}); src = (r.headers.get('X-Final-URL') || r.url).split('?')[0]; }
+      catch (e) { if (e.name === 'AbortError') throw e; throw new Error('Le lien de partage ne se résout pas. Règle le relais, ou ouvre le lien et colle l\'URL complète (…/comments/…).'); }
       if (!src.includes('/comments/')) throw new Error('Lien de partage non résolu. Ouvre-le et colle l\'URL complète (…/comments/…).');
     }
     if (src.includes('/comments/')){
@@ -334,10 +408,16 @@ $('#src').addEventListener('keydown', e => { if (e.key === 'Enter') runReddit();
 $('#stop').addEventListener('click', () => ctrl?.abort());
 $('#decode').addEventListener('click', () => {
   if (exampleShown) resetResults();
-  const n = add($('#paste').value, 'texte collé', '');
-  status(n ? `${n} nouveau(x) lien(s) décodé(s).` : 'Aucune chaîne base64 contenant un lien dans ce texte.', n ? 'ok' : '');
+  const n = add($('#paste').value, 'texte collé', '', $('#plain').checked);
+  status(n ? `${n} nouveau(x) lien(s) trouvé(s).` : 'Aucun lien trouvé dans ce texte.', n ? 'ok' : '');
 });
 $('#filter').addEventListener('input', render);
+$('#open-pastes').addEventListener('click', openAllPastes);
+$('#relay').addEventListener('change', () => store.set('b64.relay', relayURL()));
+$('#list').addEventListener('click', e => {
+  const p = e.target.closest('[data-paste]'); if (p) openPaste(+p.dataset.paste);
+  const t = e.target.closest('[data-copytext]'); if (t) copy(rows[+t.dataset.copytext].pasteText, 'Contenu du paste copié.');
+});
 $('#clear').addEventListener('click', () => { resetResults(); status('Liste vidée.'); });
 $('#copy-all').addEventListener('click', () => rows.length ? copy(rows.map(r => r.lien).join('\n'), `${rows.length} lien(s) copié(s).`) : status('Rien à copier.'));
 $('#copy-csv').addEventListener('click', () => rows.length ? copy(toCSV(), 'CSV copié dans le presse-papiers.') : status('Rien à copier.'));
@@ -355,6 +435,7 @@ if (hosted){
 }
 
 $('#cid').value = store.get('b64.cid') || '';
+$('#relay').value = store.get('b64.relay') || '';
 $('#src').value = store.get('b64.src') || 'IPTV_ZONENEW';
 if (store.get('b64.mode') === 'paste') document.querySelector('#tab-paste').click();
 
@@ -374,7 +455,7 @@ if (shared){
   document.querySelector('#tab-paste').click();
   $('#paste').value = shared;
   resetResults();
-  const n = add(shared, 'partage', '');
+  const n = add(shared, 'partage', '', true);
   if (n) status(`${n} lien(s) décodé(s) depuis le partage.`, 'ok');
   else if (/^\s*https?:\/\/\S*reddit\.com\/\S*\s*$/i.test(shared))
     status('Reddit n\'a partagé que l\'adresse du post. Sélectionne plutôt le texte du post, puis Partager vers Décodeur B64.', 'err');
