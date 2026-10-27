@@ -244,7 +244,9 @@ class Reddit {
       let r;
       try { r = await fetch(url, {signal:this.sig, headers: this.token ? {Authorization:'Bearer ' + this.token} : {}}); }
       catch (e) { if (e.name === 'AbortError') throw e;
-        throw new Error('Requête bloquée (réseau ou CORS). Ici, utilise l\'onglet « Texte collé », ou héberge l\'app (GitHub Pages) et renseigne un Client ID OAuth.'); }
+        if (!this.token){ const d = document.querySelector('details'); if (d) d.open = true;
+          throw new Error('Reddit bloque l\'accès anonyme depuis un navigateur. Renseigne un Client ID dans « Accès OAuth » ci-dessus puis relance le scan.'); }
+        throw new Error('Requête bloquée (réseau ou CORS). Vérifie ta connexion, ou utilise l\'onglet « Texte collé ».'); }
       if (r.status === 429){ const w = parseInt(r.headers.get('Retry-After')) || 10 * (a + 1); status(`Limite de requêtes atteinte, pause ${w} s…`); await sleep(w * 1000, this.sig); continue; }
       if (r.status === 403 && !this.token) throw new Error('403 : Reddit bloque l\'accès anonyme. Renseigne un Client ID dans « Accès OAuth ».');
       if (!r.ok) throw new Error(`Reddit a répondu HTTP ${r.status} pour ${path}`);
